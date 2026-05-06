@@ -236,6 +236,14 @@ r.timestamp = time(NULL);
     close(fd);
 
     printf("Report added with ID %d!\n", r.id);
+    FILE *f = fopen(".monitor_pid", "r");
+if (f) {
+    int pid;
+    fscanf(f, "%d", &pid);
+    fclose(f);
+
+    kill(pid, SIGUSR1);
+}
 }
 
 void list_reports(const char *district, const char *role) {
