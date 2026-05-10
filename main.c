@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <sys/wait.h>
+#include <signal.h>
 
 #define NAME_LEN 32
 #define CATEGORY_LEN 32
@@ -170,6 +171,35 @@ void log_action(const char *district, const char *role, const char *user, const 
     close(fd);
 }
 
+
+int notify_monitor(void) {
+    int fd = open(".monitor_pid", O_RDONLY);
+    if (fd == -1) {
+        return -1;
+    }
+
+    char buffer[32];
+    ssize_t bytes = read(fd, buffer, sizeof(buffer) - 1);
+    close(fd);
+
+    if (bytes <= 0) {
+        return -1;
+    }
+
+    buffer[bytes] = '\0';
+    pid_t pid = (pid_t)atoi(buffer);
+
+    if (pid <= 0) {
+        return -1;
+    }
+
+    if (kill(pid, SIGUSR1) == -1) {
+        return -1;
+    }
+
+    return 0;
+}
+
 void add_report(const char *district, const char *user, const char *role) {
     char path[150];
 
@@ -236,14 +266,12 @@ r.timestamp = time(NULL);
     close(fd);
 
     printf("Report added with ID %d!\n", r.id);
-    FILE *f = fopen(".monitor_pid", "r");
-if (f) {
-    int pid;
-    fscanf(f, "%d", &pid);
-    fclose(f);
 
-    kill(pid, SIGUSR1);
-}
+    if (notify_monitor() == 0) {
+        log_action(district, role, user, "monitor informed about new report");
+    } else {
+        log_action(district, role, user, "monitor could not be informed about new report");
+    }
 }
 
 void list_reports(const char *district, const char *role) {

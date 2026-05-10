@@ -3,51 +3,71 @@
 #include <unistd.h>
 #include <signal.h>
 #include <string.h>
+#include <fcntl.h>
 
 #define PID_FILE ".monitor_pid"
 
+static volatile sig_atomic_t running = 1;
+
 void handle_sigusr1(int sig) {
-    const char *msg = "Signal received: New report added\n";
+    (void)sig;
+    const char *msg = "Monitor: new report added (SIGUSR1 received)\n";
     write(STDOUT_FILENO, msg, strlen(msg));
 }
 
 void handle_sigint(int sig) {
-    const char *msg = "Monitor shutting down (SIGINT received)\n";
+    (void)sig;
+    const char *msg = "Monitor: SIGINT received, shutting down\n";
     write(STDOUT_FILENO, msg, strlen(msg));
-
-    unlink(PID_FILE); // delete file
-
-    exit(0);
+    running = 0;
 }
 
-int main() {
-    // 1. Write PID to file
-    FILE *f = fopen(PID_FILE, "w");
-    if (!f) {
+int main(void) {
+    int fd = open(PID_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) {
         perror("Error creating .monitor_pid");
         return 1;
     }
 
-    fprintf(f, "%d\n", getpid());
-    fclose(f);
+    char pid_buffer[32];
+    int len = snprintf(pid_buffer, sizeof(pid_buffer), "%ld\n", (long)getpid());
+    if (write(fd, pid_buffer, len) != len) {
+        perror("Error writing .monitor_pid");
+        close(fd);
+        unlink(PID_FILE);
+        return 1;
+    }
+    close(fd);
 
-    printf("Monitor started. PID = %d\n", getpid());
+    printf("Monitor started. PID = %ld\n", (long)getpid());
+    fflush(stdout);
 
-    // 2. Set up signal handlers
-    struct sigaction sa_usr1, sa_int;
-
+    struct sigaction sa_usr1;
     memset(&sa_usr1, 0, sizeof(sa_usr1));
     sa_usr1.sa_handler = handle_sigusr1;
-    sigaction(SIGUSR1, &sa_usr1, NULL);
+    sigemptyset(&sa_usr1.sa_mask);
 
-    memset(&sa_int, 0, sizeof(sa_int));
-    sa_int.sa_handler = handle_sigint;
-    sigaction(SIGINT, &sa_int, NULL);
-
-    // 3. Infinite wait loop
-    while (1) {
-        pause(); // wait for signals
+    if (sigaction(SIGUSR1, &sa_usr1, NULL) == -1) {
+        perror("sigaction SIGUSR1");
+        unlink(PID_FILE);
+        return 1;
     }
 
+    struct sigaction sa_int;
+    memset(&sa_int, 0, sizeof(sa_int));
+    sa_int.sa_handler = handle_sigint;
+    sigemptyset(&sa_int.sa_mask);
+
+    if (sigaction(SIGINT, &sa_int, NULL) == -1) {
+        perror("sigaction SIGINT");
+        unlink(PID_FILE);
+        return 1;
+    }
+
+    while (running) {
+        pause();
+    }
+
+    unlink(PID_FILE);
     return 0;
 }
