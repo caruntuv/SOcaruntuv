@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/types.h>
 
 #define PID_FILE ".monitor_pid"
 
@@ -11,18 +12,59 @@ static volatile sig_atomic_t running = 1;
 
 void handle_sigusr1(int sig) {
     (void)sig;
-    const char *msg = "Monitor: new report added (SIGUSR1 received)\n";
+    const char *msg ="EVENT|New report added\n";
     write(STDOUT_FILENO, msg, strlen(msg));
 }
 
 void handle_sigint(int sig) {
     (void)sig;
-    const char *msg = "Monitor: SIGINT received, shutting down\n";
+    const char *msg ="EXIT|Monitor shutting down\n";
     write(STDOUT_FILENO, msg, strlen(msg));
     running = 0;
 }
+int monitor_exists(void)
+{
+    int fd = open(PID_FILE, O_RDONLY);
+
+    if (fd == -1)
+        return 0;
+
+    char buffer[32];
+
+    int n = read(fd, buffer, sizeof(buffer) - 1);
+
+    close(fd);
+
+    if (n <= 0)
+        return 0;
+
+    buffer[n] = '\0';
+
+    pid_t existing_pid = atoi(buffer);
+
+    /*
+       kill(pid, 0)
+       checks if process exists
+    */
+    if (kill(existing_pid, 0) == 0)
+    {
+        dprintf(STDOUT_FILENO,
+                "ERROR|Monitor already running PID=%d\n",
+                existing_pid);
+
+        fflush(stdout);
+
+        return 1;
+    }
+
+    return 0;
+}
 
 int main(void) {
+  if(monitor_exists())
+    {
+      return 1;
+    }
     int fd = open(PID_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd == -1) {
         perror("Error creating .monitor_pid");
@@ -39,7 +81,7 @@ int main(void) {
     }
     close(fd);
 
-    printf("Monitor started. PID = %ld\n", (long)getpid());
+    printf("INFO|Monitor started PID=%ld\n", (long)getpid());
     fflush(stdout);
 
     struct sigaction sa_usr1;
